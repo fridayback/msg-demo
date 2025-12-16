@@ -1,0 +1,8 @@
+
+build/*
+aiken.lock
+yarn.lock
+npm.lock
+msg-agent/node_modules/*
+msg-agent/.env
+msg-demo/.github/workflows/continuous-integration.yml
