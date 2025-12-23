@@ -2,7 +2,7 @@
  * @Author: liulin blue-sky-dl5@163.com
  * @Date: 2025-12-02 11:12:29
  * @LastEditors: liulin blue-sky-dl5@163.com
- * @LastEditTime: 2025-12-23 15:10:14
+ * @LastEditTime: 2025-12-23 17:06:40
  * @FilePath: /msg-demo-project/msg-agent/index.ts
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
  */
@@ -69,10 +69,10 @@ enum TaskStatus {
     DONE = 'done'
 }
 
-const inboundDatum = serializeData(genBeneficiaryData(receiverOnAda, 18_446_744_073_709_551_616));
+const inboundDatum = serializeData(genBeneficiaryData(receiverOnAda, 10000));
 console.log('Inbount--[', inboundDatum, ']');
 console.log('[',getBeneficiaryFromCbor(inboundDatum),']');
-const test_datum = serializeData(genBeneficiaryData(receiverOnEvm, 18_446_744_073_709_551_616))
+const test_datum = serializeData(genBeneficiaryData(receiverOnEvm, 10000));//18_446_744_073_709_551_616
 console.log('--outbound[', test_datum, ']');
 console.log('--[', getBeneficiaryFromCbor(test_datum), ']');
 
@@ -80,6 +80,7 @@ const toByteEVM = mConStr0([receiverOnEvm]);
 const toByteADA = mConStr1([betch32AddressToMeshData(receiverOnAda)]);
 console.log('--toByteEVM[', serializeData(toByteEVM), ']');
 console.log('--toByteADA[', serializeData(toByteADA), ']');
+console.log('ddddd====',getMsgCrossDataFromCbor("d8799f401a80000717d87a9fd8799fd87a9f581ca7e3e3e26e14de81dd5c8f9ac38d86c1b36828a76f4bd106322bfbcdffd87a80ffff1a8057414ed8799f582a307832643337653632656537643732643562303732643862303237616632343439363066666130393230ff1a001e8480d8799f4a776d62526563656976655835d8799fd8799f582a307831643165313865316134383464306131303632333636313534366261393764656661623761376165ff14ffffff"));
 class Task implements TaskInfo {
     readonly id: string;
     readonly fromChainId: bigint;
@@ -217,7 +218,7 @@ async function sendTxDoInboundTask(wallet: MeshWallet, task: Task): Promise<stri
         .spendingPlutusScript(contractsInfo.inboundDemoScript.version)
         .txIn(task.utxo.input.txHash, task.utxo.input.outputIndex, task.utxo.output.amount, task.utxo.output.address, 0)
         .spendingReferenceTxInInlineDatumPresent()
-        .spendingReferenceTxInRedeemerValue(contractsInfo.demoTokenPolicy).txInScript(contractsInfo.inboundDemoScript.code)
+        .spendingReferenceTxInRedeemerValue(mConStr0([contractsInfo.demoTokenPolicy, defaultConfig.EvmContractADDRESS])).txInScript(contractsInfo.inboundDemoScript.code)
 
         .mintPlutusScript(contractsInfo.inboundTokenScript.version)
         .mint('-' + inboundTokenAssetOfUtxo.quantity, inboundTokenPolicy, inboundTokenName)
@@ -352,7 +353,7 @@ function genMsgCrossData(to: string, amount: string | bigint | number, direction
 function getBeneficiaryFromCbor(hex: string) {
     const datum = deserializeDatum(hex);
     const subDatum = datum.fields[0];
-    const receiver = subDatum.constructor == 0n ? Buffer.from(subDatum.fields[0].bytes, 'hex').toString('ascii') : serializeAddressObj(subDatum.fields[0], defaultConfig.NETWORK);
+    const receiver = subDatum.constructor == 0n ? subDatum.fields[0].bytes : serializeAddressObj(subDatum.fields[0], defaultConfig.NETWORK);
     const amount = datum.fields[1].int;
 
     return { receiver, amount };
@@ -487,7 +488,7 @@ async function sendTxDoOutboundTask(wallet: MeshWallet, task: Task) {
     //   burn_token_name: AssetName,
     //   xport: Address,
 
-    const outboundRedeemer = mConStr0([contractsInfo.demoTokenPolicy, defaultConfig.demoTokenName, betch32AddressToMeshData(contractsInfo.xportAddress)]);
+    const outboundRedeemer = mConStr0([contractsInfo.demoTokenPolicy, defaultConfig.demoTokenName, betch32AddressToMeshData(contractsInfo.xportAddress),defaultConfig.EvmContractADDRESS]);
 
     const changeAddress = await wallet.getChangeAddress();
     await txBuilder
@@ -592,6 +593,7 @@ async function loadWallet(seed: string) {
     });
 
     await wallet.init();
+    console.log('wallet address:',wallet.addresses.baseAddressBech32);
 
     return wallet;
 }
@@ -614,6 +616,7 @@ async function main() {
 
 export const userCossChainTransfer = async () => {
     walletUser = await loadWallet('5820' + process.env.ACCOUNT_SEED3);
+    await walletReady(walletUser);
     return await createOutboundTask(walletUser, receiverOnEvm, CROSS_TRANSFER_AMOUNT);
 }
 
