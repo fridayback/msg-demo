@@ -2,7 +2,7 @@
  * @Author: liulin blue-sky-dl5@163.com
  * @Date: 2025-12-02 11:12:29
  * @LastEditors: liulin blue-sky-dl5@163.com
- * @LastEditTime: 2025-12-23 17:06:40
+ * @LastEditTime: 2026-01-05 18:05:04
  * @FilePath: /msg-demo-project/msg-agent/index.ts
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
  */
@@ -21,7 +21,7 @@ dotenv.config({ path: path.join(__dirname, '../', '.env') });
 
 const receiverOnAda = 'addr_test1qpm0q3dmc0cq4ea75dum0dgpz4x5jsdf6jk0we04yktpuxnk7pzmhslsptnmagmek76sz92df9q6n49v7ajl2fvkrcdq9semsd';
 const receiverOnEvm = '0x1d1e18e1a484d0a10623661546ba97DEfAB7a7AE'.slice(2).toLowerCase();
-const CROSS_TRANSFER_AMOUNT = 20;
+const CROSS_TRANSFER_AMOUNT = 100;
 
 console.log(`inboundDemoScript address: ${contractsInfo.inboundDemoAddress}`);
 console.log(`inboundTokenScript policy: ${contractsInfo.inboundTokenPolicy}`);
@@ -69,10 +69,10 @@ enum TaskStatus {
     DONE = 'done'
 }
 
-const inboundDatum = serializeData(genBeneficiaryData(receiverOnAda, 10000));
+const inboundDatum = 'd87982d87a81d87982d87981581c76f045bbc3f00ae7bea379b7b501154d4941a9d4acf765f525961e1ad87981d87981d87981581c76f045bbc3f00ae7bea379b7b501154d4941a9d4acf765f525961e1a192710';//serializeData(genBeneficiaryData(receiverOnAda, 10000));
 console.log('Inbount--[', inboundDatum, ']');
 console.log('[',getBeneficiaryFromCbor(inboundDatum),']');
-const test_datum = serializeData(genBeneficiaryData(receiverOnEvm, 10000));//18_446_744_073_709_551_616
+const test_datum = serializeData(genBeneficiaryData(receiverOnEvm, 18_446_744_073_709_551_616*1024));//18_446_744_073_709_551_616
 console.log('--outbound[', test_datum, ']');
 console.log('--[', getBeneficiaryFromCbor(test_datum), ']');
 
@@ -80,6 +80,7 @@ const toByteEVM = mConStr0([receiverOnEvm]);
 const toByteADA = mConStr1([betch32AddressToMeshData(receiverOnAda)]);
 console.log('--toByteEVM[', serializeData(toByteEVM), ']');
 console.log('--toByteADA[', serializeData(toByteADA), ']');
+                                                
 console.log('ddddd====',getMsgCrossDataFromCbor("d8799f401a80000717d87a9fd8799fd87a9f581ca7e3e3e26e14de81dd5c8f9ac38d86c1b36828a76f4bd106322bfbcdffd87a80ffff1a8057414ed8799f582a307832643337653632656537643732643562303732643862303237616632343439363066666130393230ff1a001e8480d8799f4a776d62526563656976655835d8799fd8799f582a307831643165313865316134383464306131303632333636313534366261393764656661623761376165ff14ffffff"));
 class Task implements TaskInfo {
     readonly id: string;
@@ -100,7 +101,7 @@ class Task implements TaskInfo {
         if (utxo.output.amount.find((item) => (item.unit.indexOf(contractsInfo.inboundTokenPolicy) == 0))) {
             this.taskType = TaskType.INBOUND;
             const msgCrossData = getMsgCrossDataFromCbor(utxo.output.plutusData);
-            this.id = msgCrossData.msgId;
+            this.id = Buffer.from(msgCrossData.msgId,'hex').toString('ascii');
             this.fromChainId = msgCrossData.fromChainId;
             this.fromContract = msgCrossData.fromContract;
             this.toChainId = msgCrossData.toChainId;
@@ -117,7 +118,7 @@ class Task implements TaskInfo {
             this.targetContract = defaultConfig.EvmContractADDRESS;
             this.gasLimit = 2000000n;
             this.functionCallData = {
-                functionName: 'wmbReceive',
+                functionName: 'wmbReceiveNonEvm',
                 functionArgs: { receiver: beneficiary.receiver, amount: beneficiary.amount }
             };
 
@@ -169,14 +170,17 @@ let outboundTaskPool: TaskPool = new TaskPool();
 let walletInbound: MeshWallet;
 let walletOutbound: MeshWallet;
 let walletUser: MeshWallet;
+let badTaskUtxos = new Map<string, number>;
 // class WalletPool
 async function fetchTask(provider: BlockfrostProvider, taskType: TaskType) {
     // await createInboundTask(receiverOnAda, CROSS_TRANSFER_AMOUNT);
     const taskContractAddress = taskType == TaskType.INBOUND ? contractsInfo.inboundDemoAddress : contractsInfo.outboundDemoAddress;
     let taskPool = taskType == TaskType.INBOUND ? inboundTaskPool : outboundTaskPool;
     const utxos = await provider.fetchAddressUTxOs(taskContractAddress);
+    
     utxos.map(utxo => {
-        // if (utxo.input.txHash != '8c181ac3a93e4beadb3fac33bc79e60c8986a43aafa29eead9f25aef5851b75a') return;
+        const key = (utxo.input.txHash+'#'+utxo.input.outputIndex).toLowerCase();
+        if (badTaskUtxos.has(key) && badTaskUtxos.get(key) >= 1) return;
         try {
             const task = new Task(utxo);
             if (taskPool.isExist(task.id)) {
@@ -187,7 +191,9 @@ async function fetchTask(provider: BlockfrostProvider, taskType: TaskType) {
 
             console.log(`add ${taskType} task : [${task.id}], current task pool size: ${taskPool.size()} receiver: ${task.functionCallData.functionArgs.receiver}, amount: ${task.functionCallData.functionArgs.amount}`);
         } catch (error) {
-            console.log(`${utxo.input.txHash}#${utxo.input.outputIndex} is not a valid ${taskType} task`);
+            const key = (utxo.input.txHash+'#'+utxo.input.outputIndex).toLowerCase();
+            badTaskUtxos.set(key, badTaskUtxos.has(key) ? badTaskUtxos.get(key) + 1 : 1);
+            console.log(`[${key}]${utxo.input.txHash}#${utxo.input.outputIndex} is not a valid ${taskType} task, failed ${badTaskUtxos.get(key)} times`);
             console.error(error);
         }
     });
@@ -195,7 +201,7 @@ async function fetchTask(provider: BlockfrostProvider, taskType: TaskType) {
 
 async function sendTxDoInboundTask(wallet: MeshWallet, task: Task): Promise<string> {
 
-    const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider, evaluator: provider });
+    const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider, evaluator: ogmios });
 
     let assets = [{
         unit: contractsInfo.demoTokenPolicy + defaultConfig.demoTokenName,
@@ -272,7 +278,10 @@ async function doTask(taskType: TaskType) {
                 default: break;
             }
         } catch (error) {
-            console.error(`send Tx failed for do ${taskType} task ${task.id}`, error);
+            console.error(`send Tx failed for do ${taskType} task ${task.id}, utxo =${ task.utxo.input.txHash}#${task.utxo.input.outputIndex}`, error);
+
+            const key = (task.utxo.input.txHash+'#'+task.utxo.input.outputIndex).toLowerCase();
+            badTaskUtxos.set(key, badTaskUtxos.has(key) ? badTaskUtxos.get(key) + 1 : 1);
         }
 
 
@@ -345,7 +354,7 @@ function genMsgCrossData(to: string, amount: string | bigint | number, direction
     const toAddress = direction == TaskType.INBOUND ? mConStr1([mScriptAddress(scriptHash)]) : mConStr0([defaultConfig.EvmContractADDRESS]);
     const gasLimit = 2000000;//should to be a config feild
 
-    const tmpCallData = mConStr0(['wmbReceive', serializeData(genBeneficiaryData(to, amount))]);
+    const tmpCallData = mConStr0(['wmbReceiveNonEvm', serializeData(genBeneficiaryData(to, amount))]);//wmbReceive
     return mConStr0([taskId, fromChainId, fromAddress, toChainId, toAddress, gasLimit, tmpCallData]);
     // return mConStr0([receiver, amount]);
 }
@@ -460,7 +469,7 @@ async function sendTxDoOutboundTask(wallet: MeshWallet, task: Task) {
     const asset = outboundTaskUtxo.output.amount.find((item) => (item.unit.indexOf(contractsInfo.demoTokenPolicy) == 0));
     if (!asset || BigInt(asset.quantity) < BigInt(beneficiary.amount)) { throw 'not enough token' };
 
-    const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider, evaluator: provider });
+    const txBuilder = new MeshTxBuilder({ fetcher: provider, submitter: provider, evaluator: ogmios });
     let assetsOfOutboundToken = [{
         unit: contractsInfo.outboundTokenPolicy + defaultConfig.OUTBOUND_TOKEN_NAME,
         quantity: '1'
@@ -616,7 +625,6 @@ async function main() {
 
 export const userCossChainTransfer = async () => {
     walletUser = await loadWallet('5820' + process.env.ACCOUNT_SEED3);
-    await walletReady(walletUser);
     return await createOutboundTask(walletUser, receiverOnEvm, CROSS_TRANSFER_AMOUNT);
 }
 
