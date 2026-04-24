@@ -656,6 +656,7 @@ program
     .description('cross-transfer demoToken')
     .action(async () => {
         walletUser = await loadWallet('5820' + process.env.ACCOUNT_SEED3);
+        await walletReady(walletUser);
         await createOutboundTask(walletUser, receiverOnEvm, CROSS_TRANSFER_AMOUNT);
     });
 
